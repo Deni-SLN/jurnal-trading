@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import { useState, useEffect, useCallback, Suspense } from "react"
 import { useSearchParams } from "next/navigation"
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -142,10 +142,10 @@ function ApiKeyField({
 }
 
 // ---------------------------------------------------------------------------
-// Main settings page
+// Main settings page — inner component (uses useSearchParams → needs Suspense)
 // ---------------------------------------------------------------------------
 
-export default function SettingsPage() {
+function SettingsInner() {
   const searchParams = useSearchParams()
   const defaultTab   = searchParams.get("tab") === "api" ? "api" : "profile"
 
@@ -616,5 +616,14 @@ export default function SettingsPage() {
         </TabsContent>
       </Tabs>
     </div>
+  )
+}
+
+// Suspense boundary required because useSearchParams() suspends during SSR/prerender
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<div className="p-8 text-muted-foreground text-sm">Memuat settings…</div>}>
+      <SettingsInner />
+    </Suspense>
   )
 }

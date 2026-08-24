@@ -22,7 +22,7 @@ interface Message {
 }
 
 interface AIConfig {
-  provider:    "openrouter" | "openai"
+  provider:    "openrouter" | "openai" | "gemini"
   model:       string
   prefer_free: boolean
 }
@@ -61,19 +61,26 @@ export default function AIChatPage() {
         const res = await fetch("/api/ai/settings")
         if (res.ok) {
           const data = await res.json()
+          const provider = data.provider || "gemini"
           setAiConfig({
-            provider:    data.provider    || "openrouter",
+            provider,
             model:       data.model       || "auto",
             prefer_free: data.prefer_free ?? true,
           })
-          // Check if key is configured (not empty, not masked placeholder of empty)
-          const hasKey = data.provider === "openrouter"
-            ? !!data.openrouter_key
-            : !!data.openai_key
+          // Only show config error if key is definitely empty (not just unloaded)
+          const hasKey =
+            provider === "openrouter" ? !!data.openrouter_key :
+            provider === "openai"     ? !!data.openai_key     :
+            provider === "gemini"     ? !!data.gemini_key     :
+            false
           setConfigError(!hasKey)
+        } else {
+          // API error — don't block the UI, just let user try
+          setConfigError(false)
         }
       } catch {
-        setConfigError(true)
+        // Network error — don't block input, user can still try
+        setConfigError(false)
       }
     }
     loadConfig()
