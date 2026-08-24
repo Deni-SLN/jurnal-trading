@@ -3,12 +3,23 @@ import { createClient } from "@/lib/supabase/server"
 import { hmacSha256Hex } from "@/lib/hmac"
 
 // ---------------------------------------------------------------------------
-// Bybit v5 REST helpers
+// Force this serverless function to run in Singapore (Bybit blocks US IPs)
+// Vercel region codes: sin1=Singapore, hnd1=Tokyo, icn1=Seoul, bom1=Mumbai
 // ---------------------------------------------------------------------------
+export const preferredRegion = ["sin1", "hnd1", "icn1", "bom1"]
 
-// api.bybit.com is CloudFront-blocked from some regions.
-// Fallback chain: api.bybit.com → api.bytick.com (Bybit mirror, no geo-block)
-const BYBIT_ENDPOINTS = ["https://api.bybit.com", "https://api.bytick.com"]
+// ---------------------------------------------------------------------------
+// Bybit endpoints — full list from official docs
+// Ordered by preference: Singapore mirror first, then regional, then main
+// All of these are official Bybit endpoints (NOT blocked for most regions)
+// api.bybit.com & api.bytick.com are blocked from US/CN — hence the list
+// ---------------------------------------------------------------------------
+const BYBIT_ENDPOINTS = [
+  "https://api.bytick.com",       // Bybit Singapore mirror
+  "https://api.bybit.com",        // Main (blocked from US/CN)
+  "https://api.bybit.nl",         // Netherlands
+  "https://api.bybit.eu",         // EEA
+]
 
 async function bybitGet(
   path: string,
@@ -44,17 +55,21 @@ async function bybitGet(
         continue // try next endpoint
       }
       if (!res.ok) {
-        throw new Error(`Bybit HTTP ${res.status}: ${text.slice(0, 300)}`)
+        lastError = `${base} HTTP ${res.status}: ${text.slice(0, 200)}`
+        continue // try next endpoint on any HTTP error
       }
-      try { return JSON.parse(text) }
-      catch { throw new Error(`Bybit non-JSON: ${text.slice(0, 300)}`) }
+      try {
+        return JSON.parse(text)
+      } catch {
+        lastError = `${base} non-JSON response`
+        continue
+      }
     } catch (e) {
-      lastError = (e as Error).message
-      if (lastError.includes("geo-blocked")) continue
-      throw e // non-403 errors: don't retry
+      lastError = `${base} fetch error: ${(e as Error).message}`
+      continue // network error — try next endpoint
     }
   }
-  throw new Error(`Bybit all endpoints failed: ${lastError}`)
+  throw new Error(`Semua endpoint Bybit gagal. ${lastError}`)
 }
 
 // ---------------------------------------------------------------------------
