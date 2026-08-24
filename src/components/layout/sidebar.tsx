@@ -30,7 +30,7 @@ const navItems = [
   { href: "/watchlist", label: "Watchlist", icon: Eye },
   { href: "/psychology", label: "Psychology", icon: Brain },
   { href: "/risk", label: "Risk", icon: Shield },
-  { href: "/ai-review", label: "AI Review", icon: TrendingUp },
+  { href: "/ai-review", label: "AI Chat", icon: TrendingUp },
   { href: "/import", label: "Import", icon: FileText },
   { href: "/settings", label: "Settings", icon: Settings },
 ]

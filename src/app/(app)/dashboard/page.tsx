@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
 import Link from "next/link"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
@@ -11,49 +11,73 @@ import { calculateTradeStats } from "@/lib/calculations"
 import { createClient } from "@/lib/supabase/client"
 import { Trade, TradeStats } from "@/types/database"
 import { useAppStore } from "@/stores/app-store"
+import { DollarSign, Target, BarChart3, Activity, Zap } from "lucide-react"
 import {
-  DollarSign,
-  Target,
-  BarChart3,
-  Activity,
-  Zap,
-} from "lucide-react"
-import {
-  ResponsiveContainer,
-  AreaChart,
-  Area,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
+  ResponsiveContainer, AreaChart, Area, XAxis, YAxis, CartesianGrid, Tooltip,
 } from "recharts"
 
-function StatCard({ title, value, subtitle, icon: Icon, trend }: {
+// ---------------------------------------------------------------------------
+// IDR rate — fetched once per session from a free public API
+// ---------------------------------------------------------------------------
+const IDR_FALLBACK = 16300 // fallback if fetch fails
+
+async function fetchUsdToIdr(): Promise<number> {
+  try {
+    const res = await fetch("https://open.er-api.com/v6/latest/USD", { cache: "no-store" })
+    const json = await res.json()
+    return json?.rates?.IDR ?? IDR_FALLBACK
+  } catch {
+    return IDR_FALLBACK
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Source tabs config
+// ---------------------------------------------------------------------------
+const SOURCE_TABS = [
+  { id: "all",          label: "Semua" },
+  { id: "bybit",        label: "Bybit" },
+  { id: "okx",          label: "OKX" },
+  { id: "manual_stock", label: "Saham" },
+] as const
+
+type SourceTab = (typeof SOURCE_TABS)[number]["id"]
+
+// ---------------------------------------------------------------------------
+// Stat card
+// ---------------------------------------------------------------------------
+function StatCard({
+  title, valueUsd, valueIdr, subtitle, icon: Icon, trend,
+}: {
   title: string
-  value: string
+  valueUsd: string
+  valueIdr: string
   subtitle?: string
   icon: React.ElementType
   trend?: "up" | "down" | "neutral"
 }) {
+  const color =
+    trend === "up"   ? "text-emerald-500" :
+    trend === "down" ? "text-red-500"     : "text-foreground"
+  const bg =
+    trend === "up"   ? "bg-emerald-500/10" :
+    trend === "down" ? "bg-red-500/10"     : "bg-blue-500/10"
+  const iconColor =
+    trend === "up"   ? "text-emerald-500" :
+    trend === "down" ? "text-red-500"     : "text-blue-500"
+
   return (
     <Card>
-      <CardContent className="p-6">
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-gray-400">{title}</p>
-            <p className={`text-2xl font-bold mt-1 font-mono ${
-              trend === "up" ? "text-emerald-400" : trend === "down" ? "text-red-400" : "text-gray-100"
-            }`}>
-              {value}
-            </p>
-            {subtitle && <p className="text-xs text-gray-500 mt-1">{subtitle}</p>}
+      <CardContent className="p-5">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground truncate">{title}</p>
+            <p className={`text-xl font-bold mt-0.5 font-mono ${color}`}>{valueUsd}</p>
+            <p className="text-xs font-mono text-muted-foreground mt-0.5">{valueIdr}</p>
+            {subtitle && <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>}
           </div>
-          <div className={`h-10 w-10 rounded-lg flex items-center justify-center ${
-            trend === "up" ? "bg-emerald-500/10" : trend === "down" ? "bg-red-500/10" : "bg-blue-500/10"
-          }`}>
-            <Icon className={`h-5 w-5 ${
-              trend === "up" ? "text-emerald-400" : trend === "down" ? "text-red-400" : "text-blue-400"
-            }`} />
+          <div className={`h-9 w-9 rounded-lg flex items-center justify-center shrink-0 ${bg}`}>
+            <Icon className={`h-4 w-4 ${iconColor}`} />
           </div>
         </div>
       </CardContent>
@@ -61,28 +85,35 @@ function StatCard({ title, value, subtitle, icon: Icon, trend }: {
   )
 }
 
+// ---------------------------------------------------------------------------
+// Main page
+// ---------------------------------------------------------------------------
 export default function DashboardPage() {
-  const [trades, setTrades] = useState<Trade[]>([])
-  const [stats, setStats] = useState<TradeStats | null>(null)
-  const [period, setPeriod] = useState("30D")
-  const [loading, setLoading] = useState(true)
+  const [allTrades, setAllTrades] = useState<Trade[]>([])
+  const [period,    setPeriod]    = useState("30D")
+  const [source,    setSource]    = useState<SourceTab>("all")
+  const [loading,   setLoading]   = useState(true)
+  const [idrRate,   setIdrRate]   = useState(IDR_FALLBACK)
   const { setUser } = useAppStore()
 
+  // Fetch exchange rate once
+  useEffect(() => {
+    fetchUsdToIdr().then(setIdrRate)
+  }, [])
+
+  // Load trades
   useEffect(() => {
     const loadData = async () => {
+      setLoading(true)
       const supabase = createClient()
       const { data: { user } } = await supabase.auth.getUser()
       if (user) {
-        const { data: profile } = await supabase
-          .from("users")
-          .select("*")
-          .eq("id", user.id)
-          .single()
+        const { data: profile } = await supabase.from("users").select("*").eq("id", user.id).single()
         if (profile) setUser(profile)
       }
 
       const periodDays: Record<string, number> = { "7D": 7, "30D": 30, "90D": 90, "YTD": 365, "ALL": 3650 }
-      const days = periodDays[period] || 30
+      const days  = periodDays[period] || 30
       const since = new Date()
       since.setDate(since.getDate() - days)
 
@@ -92,52 +123,59 @@ export default function DashboardPage() {
         .gte("opened_at", since.toISOString())
         .order("opened_at", { ascending: false })
 
-      const tradeData = (data || []) as Trade[]
-      setTrades(tradeData)
-      setStats(calculateTradeStats(tradeData))
+      setAllTrades((data || []) as Trade[])
       setLoading(false)
     }
     loadData()
   }, [period, setUser])
 
-  const equityCurve = trades
-    .filter(t => t.status === "closed" && t.net_pnl !== null)
-    .sort((a, b) => new Date(a.closed_at!).getTime() - new Date(b.closed_at!).getTime())
-    .reduce((acc, t) => {
-      const prev = acc[acc.length - 1]?.equity || 0
-      acc.push({
-        date: new Date(t.closed_at!).toLocaleDateString("id-ID", { day: "2-digit", month: "short" }),
-        equity: prev + (t.net_pnl || 0),
-        pnl: t.net_pnl || 0,
-      })
-      return acc
-    }, [] as { date: string; equity: number; pnl: number }[])
+  // Filter by source tab
+  const trades = useMemo(() => {
+    if (source === "all") return allTrades
+    return allTrades.filter((t) => t.trade_source === source)
+  }, [allTrades, source])
 
-  const recentTrades = trades.slice(0, 10)
+  const stats = useMemo(() => calculateTradeStats(trades), [trades])
 
-  if (loading) {
-    return (
-      <div className="space-y-6">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-          {[...Array(4)].map((_, i) => (
-            <Card key={i}><CardContent className="p-6"><div className="h-16 animate-pulse bg-gray-800 rounded" /></CardContent></Card>
-          ))}
-        </div>
-      </div>
-    )
-  }
+  const equityCurve = useMemo(() =>
+    trades
+      .filter((t) => t.status === "closed" && t.net_pnl !== null)
+      .sort((a, b) => new Date(a.closed_at!).getTime() - new Date(b.closed_at!).getTime())
+      .reduce((acc, t) => {
+        const prev = acc[acc.length - 1]?.equity || 0
+        acc.push({
+          date:   new Date(t.closed_at!).toLocaleDateString("id-ID", { day: "2-digit", month: "short" }),
+          equity: prev + (t.net_pnl || 0),
+          pnl:    t.net_pnl || 0,
+        })
+        return acc
+      }, [] as { date: string; equity: number; pnl: number }[]),
+  [trades])
+
+  // Helpers
+  const usd  = (v: number) => formatCurrency(v, "USD")
+  const idr  = (v: number) => formatCurrency(v * idrRate, "IDR")
+  const pct  = (v: number) => formatPercent(v).replace("+", "")
 
   return (
-    <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-white">Dashboard</h1>
-        <div className="flex gap-1 bg-gray-800/50 rounded-lg p-1">
+    <div className="space-y-5">
+      {/* Header row */}
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-2xl font-bold text-foreground">Dashboard</h1>
+
+        {/* Period toggle */}
+        <div
+          className="flex gap-1 rounded-lg p-1"
+          style={{ background: "var(--muted)" }}
+        >
           {["7D", "30D", "90D", "YTD", "ALL"].map((p) => (
             <button
               key={p}
               onClick={() => setPeriod(p)}
               className={`px-3 py-1.5 text-xs font-medium rounded-md transition-colors ${
-                period === p ? "bg-blue-600 text-white" : "text-gray-400 hover:text-gray-200"
+                period === p
+                  ? "bg-blue-600 text-white"
+                  : "text-muted-foreground hover:text-foreground"
               }`}
             >
               {p}
@@ -146,45 +184,83 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
-        <StatCard
-          title="Net PnL"
-          value={formatCurrency(stats?.netPnl || 0)}
-          icon={DollarSign}
-          trend={(stats?.netPnl || 0) >= 0 ? "up" : "down"}
-          subtitle={`${stats?.totalTrades || 0} trades`}
-        />
-        <StatCard
-          title="Win Rate"
-          value={formatPercent(stats?.winRate || 0).replace("+", "")}
-          icon={Target}
-          trend={(stats?.winRate || 0) >= 50 ? "up" : "down"}
-          subtitle={`${stats?.winningTrades || 0}W / ${stats?.losingTrades || 0}L`}
-        />
-        <StatCard
-          title="Profit Factor"
-          value={formatNumber(stats?.profitFactor || 0)}
-          icon={BarChart3}
-          trend={(stats?.profitFactor || 0) >= 1 ? "up" : "down"}
-          subtitle={`Expectancy: ${formatCurrency(stats?.expectancy || 0)}`}
-        />
-        <StatCard
-          title="Max Drawdown"
-          value={formatPercent(-(stats?.maxDrawdown || 0))}
-          icon={Activity}
-          trend={(stats?.maxDrawdown || 0) <= 10 ? "up" : "down"}
-          subtitle={`Avg R: ${formatNumber(stats?.avgRMultiple || 0)}`}
-        />
+      {/* Source tabs */}
+      <div className="flex gap-2 flex-wrap">
+        {SOURCE_TABS.map((tab) => {
+          const active = source === tab.id
+          const count  = tab.id === "all"
+            ? allTrades.length
+            : allTrades.filter((t) => t.trade_source === tab.id).length
+          return (
+            <button
+              key={tab.id}
+              onClick={() => setSource(tab.id)}
+              className={`flex items-center gap-1.5 px-4 py-2 rounded-lg text-sm font-medium transition-colors border ${
+                active
+                  ? "bg-blue-600 text-white border-blue-600"
+                  : "border-border text-muted-foreground hover:text-foreground hover:border-blue-400"
+              }`}
+            >
+              {tab.label}
+              <span className={`text-xs px-1.5 py-0.5 rounded-full ${active ? "bg-white/20" : "bg-muted"}`}>
+                {count}
+              </span>
+            </button>
+          )
+        })}
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+      {/* Stat cards */}
+      {loading ? (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          {[...Array(4)].map((_, i) => (
+            <Card key={i}><CardContent className="p-5"><div className="h-20 animate-pulse rounded-lg bg-muted" /></CardContent></Card>
+          ))}
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <StatCard
+            title="Net PnL"
+            valueUsd={usd(stats?.netPnl || 0)}
+            valueIdr={idr(stats?.netPnl || 0)}
+            icon={DollarSign}
+            trend={(stats?.netPnl || 0) >= 0 ? "up" : "down"}
+            subtitle={`${stats?.totalTrades || 0} trades`}
+          />
+          <StatCard
+            title="Win Rate"
+            valueUsd={pct(stats?.winRate || 0)}
+            valueIdr={`${stats?.winningTrades || 0}W / ${stats?.losingTrades || 0}L`}
+            icon={Target}
+            trend={(stats?.winRate || 0) >= 50 ? "up" : "down"}
+          />
+          <StatCard
+            title="Profit Factor"
+            valueUsd={formatNumber(stats?.profitFactor || 0)}
+            valueIdr={`Expectancy: ${usd(stats?.expectancy || 0)}`}
+            icon={BarChart3}
+            trend={(stats?.profitFactor || 0) >= 1 ? "up" : "down"}
+          />
+          <StatCard
+            title="Max Drawdown"
+            valueUsd={pct(-(stats?.maxDrawdown || 0))}
+            valueIdr={`≈ ${idr(stats?.maxDrawdown || 0)}`}
+            icon={Activity}
+            trend={(stats?.maxDrawdown || 0) <= 10 ? "up" : "down"}
+            subtitle={`Avg R: ${formatNumber(stats?.avgRMultiple || 0)}`}
+          />
+        </div>
+      )}
+
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
+        {/* Equity curve */}
         <Card className="lg:col-span-2">
-          <CardHeader>
+          <CardHeader className="pb-2">
             <CardTitle className="text-base">Equity Curve</CardTitle>
           </CardHeader>
           <CardContent>
             {equityCurve.length > 0 ? (
-              <ResponsiveContainer width="100%" height={300}>
+              <ResponsiveContainer width="100%" height={280}>
                 <AreaChart data={equityCurve}>
                   <defs>
                     <linearGradient id="equityGrad" x1="0" y1="0" x2="0" y2="1">
@@ -192,72 +268,73 @@ export default function DashboardPage() {
                       <stop offset="95%" stopColor="#3b82f6" stopOpacity={0} />
                     </linearGradient>
                   </defs>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" />
-                  <XAxis dataKey="date" stroke="#64748b" fontSize={12} />
-                  <YAxis stroke="#64748b" fontSize={12} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border)" />
+                  <XAxis dataKey="date" stroke="var(--muted-foreground)" fontSize={11} />
+                  <YAxis stroke="var(--muted-foreground)" fontSize={11} />
                   <Tooltip
-                    contentStyle={{ backgroundColor: "#1e293b", border: "1px solid #334155", borderRadius: "8px" }}
-                    labelStyle={{ color: "#94a3b8" }}
+                    contentStyle={{
+                      backgroundColor: "var(--card)",
+                      border: "1px solid var(--border)",
+                      borderRadius: "8px",
+                      color: "var(--foreground)",
+                    }}
+                    labelStyle={{ color: "var(--muted-foreground)" }}
                   />
                   <Area type="monotone" dataKey="equity" stroke="#3b82f6" fill="url(#equityGrad)" strokeWidth={2} />
                 </AreaChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-[300px] flex items-center justify-center text-gray-500">
+              <div className="h-[280px] flex items-center justify-center text-muted-foreground">
                 <div className="text-center">
                   <BarChart3 className="h-12 w-12 mx-auto mb-3 opacity-30" />
                   <p>Belum ada data trade</p>
-                  <p className="text-sm mt-1">Tambahkan trade pertama Anda</p>
+                  <p className="text-sm mt-1">Tambahkan trade atau sync exchange</p>
                 </div>
               </div>
             )}
           </CardContent>
         </Card>
 
+        {/* Quick stats */}
         <Card>
-          <CardHeader>
+          <CardHeader className="pb-2">
             <CardTitle className="text-base">Quick Stats</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-400">Best Trade</span>
-              <span className="text-sm font-mono text-emerald-400">{formatCurrency(stats?.bestTrade || 0)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-400">Worst Trade</span>
-              <span className="text-sm font-mono text-red-400">{formatCurrency(stats?.worstTrade || 0)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-400">Avg Win</span>
-              <span className="text-sm font-mono text-emerald-400">{formatCurrency(stats?.avgWin || 0)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-400">Avg Loss</span>
-              <span className="text-sm font-mono text-red-400">{formatCurrency(stats?.avgLoss || 0)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-400">Gross Profit</span>
-              <span className="text-sm font-mono text-emerald-400">{formatCurrency(stats?.grossProfit || 0)}</span>
-            </div>
-            <div className="flex justify-between items-center">
-              <span className="text-sm text-gray-400">Gross Loss</span>
-              <span className="text-sm font-mono text-red-400">{formatCurrency(stats?.grossLoss || 0)}</span>
-            </div>
+          <CardContent className="space-y-3">
+            {[
+              { label: "Best Trade",    usdVal: stats?.bestTrade  || 0, positive: true },
+              { label: "Worst Trade",   usdVal: stats?.worstTrade || 0, positive: false },
+              { label: "Avg Win",       usdVal: stats?.avgWin     || 0, positive: true },
+              { label: "Avg Loss",      usdVal: stats?.avgLoss    || 0, positive: false },
+              { label: "Gross Profit",  usdVal: stats?.grossProfit|| 0, positive: true },
+              { label: "Gross Loss",    usdVal: stats?.grossLoss  || 0, positive: false },
+            ].map(({ label, usdVal, positive }) => (
+              <div key={label} className="space-y-0.5">
+                <div className="flex justify-between items-center">
+                  <span className="text-sm text-muted-foreground">{label}</span>
+                  <span className={`text-sm font-mono font-medium ${positive ? "text-emerald-500" : "text-red-500"}`}>
+                    {usd(usdVal)}
+                  </span>
+                </div>
+                <div className="flex justify-end">
+                  <span className="text-xs font-mono text-muted-foreground">{idr(usdVal)}</span>
+                </div>
+              </div>
+            ))}
           </CardContent>
         </Card>
       </div>
 
+      {/* Recent trades */}
       <Card>
-        <CardHeader className="flex flex-row items-center justify-between">
+        <CardHeader className="flex flex-row items-center justify-between pb-2">
           <CardTitle className="text-base">Recent Trades</CardTitle>
           <Link href="/trades">
-            <Button variant="ghost" size="sm">
-              View All
-            </Button>
+            <Button variant="ghost" size="sm">Lihat Semua</Button>
           </Link>
         </CardHeader>
-        <CardContent>
-          {recentTrades.length > 0 ? (
+        <CardContent className="p-0">
+          {trades.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -265,13 +342,13 @@ export default function DashboardPage() {
                   <TableHead>Side</TableHead>
                   <TableHead>Source</TableHead>
                   <TableHead className="text-right">Entry</TableHead>
-                  <TableHead className="text-right">Exit</TableHead>
-                  <TableHead className="text-right">Net PnL</TableHead>
-                  <TableHead className="text-right">Date</TableHead>
+                  <TableHead className="text-right">Net PnL (USD)</TableHead>
+                  <TableHead className="text-right">Net PnL (IDR)</TableHead>
+                  <TableHead className="text-right">Tanggal</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {recentTrades.map((trade) => (
+                {trades.slice(0, 10).map((trade) => (
                   <TableRow key={trade.id}>
                     <TableCell className="font-medium font-mono">{trade.symbol}</TableCell>
                     <TableCell>
@@ -280,18 +357,16 @@ export default function DashboardPage() {
                       </Badge>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{trade.trade_source}</Badge>
+                      <Badge variant="secondary" className="capitalize">{trade.trade_source.replace("_", " ")}</Badge>
                     </TableCell>
-                    <TableCell className="text-right font-mono">{formatNumber(trade.entry_price, 4)}</TableCell>
-                    <TableCell className="text-right font-mono">
-                      {trade.exit_price ? formatNumber(trade.exit_price, 4) : "-"}
+                    <TableCell className="text-right font-mono text-sm">{formatNumber(trade.entry_price, 4)}</TableCell>
+                    <TableCell className={`text-right font-mono text-sm ${(trade.net_pnl || 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {trade.net_pnl !== null ? usd(trade.net_pnl) : "—"}
                     </TableCell>
-                    <TableCell className={`text-right font-mono ${
-                      (trade.net_pnl || 0) >= 0 ? "text-emerald-400" : "text-red-400"
-                    }`}>
-                      {trade.net_pnl !== null ? formatCurrency(trade.net_pnl) : "-"}
+                    <TableCell className={`text-right font-mono text-sm ${(trade.net_pnl || 0) >= 0 ? "text-emerald-500" : "text-red-500"}`}>
+                      {trade.net_pnl !== null ? idr(trade.net_pnl) : "—"}
                     </TableCell>
-                    <TableCell className="text-right text-gray-400 text-sm">
+                    <TableCell className="text-right text-muted-foreground text-sm">
                       {new Date(trade.opened_at).toLocaleDateString("id-ID")}
                     </TableCell>
                   </TableRow>
@@ -299,13 +374,13 @@ export default function DashboardPage() {
               </TableBody>
             </Table>
           ) : (
-            <div className="text-center py-12 text-gray-500">
+            <div className="text-center py-12 text-muted-foreground">
               <Zap className="h-12 w-12 mx-auto mb-3 opacity-30" />
-              <p>Belum ada trade</p>
+              <p>Belum ada trade di periode ini</p>
               <p className="text-sm mt-1">
-                <a href="/trades" className="text-blue-400 hover:underline">Tambah trade baru</a>
+                <Link href="/trades" className="text-blue-500 hover:underline">Tambah trade</Link>
                 {" "}atau{" "}
-                <a href="/settings" className="text-blue-400 hover:underline">hubungkan exchange</a>
+                <Link href="/import" className="text-blue-500 hover:underline">sync exchange</Link>
               </p>
             </div>
           )}

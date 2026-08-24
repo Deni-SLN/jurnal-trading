@@ -6,7 +6,9 @@ import { hmacSha256Hex } from "@/lib/hmac"
 // Bybit v5 REST helpers
 // ---------------------------------------------------------------------------
 
-const BYBIT_BASE = "https://api.bybit.com"
+// api.bybit.com is CloudFront-blocked from some regions.
+// Fallback chain: api.bybit.com → api.bytick.com (Bybit mirror, no geo-block)
+const BYBIT_ENDPOINTS = ["https://api.bybit.com", "https://api.bytick.com"]
 
 async function bybitGet(
   path: string,
@@ -23,26 +25,36 @@ async function bybitGet(
   const prehash = timestamp + apiKey + recvWindow + qs
   const sig     = await hmacSha256Hex(secret, prehash)
 
-  const url = `${BYBIT_BASE}${path}?${qs}`
-  const res = await fetch(url, {
-    method: "GET",
-    headers: {
-      "X-BAPI-API-KEY":      apiKey,
-      "X-BAPI-SIGN":         sig,
-      "X-BAPI-TIMESTAMP":    timestamp,
-      "X-BAPI-RECV-WINDOW":  recvWindow,
-    },
-  })
+  const headers = {
+    "X-BAPI-API-KEY":      apiKey,
+    "X-BAPI-SIGN":         sig,
+    "X-BAPI-TIMESTAMP":    timestamp,
+    "X-BAPI-RECV-WINDOW":  recvWindow,
+  }
 
-  const text = await res.text()
-  if (!res.ok) {
-    throw new Error(`Bybit HTTP ${res.status}: ${text.slice(0, 300)}`)
+  // Try each endpoint in order, return first success
+  let lastError = ""
+  for (const base of BYBIT_ENDPOINTS) {
+    try {
+      const url = `${base}${path}?${qs}`
+      const res = await fetch(url, { method: "GET", headers })
+      const text = await res.text()
+      if (res.status === 403) {
+        lastError = `${base} HTTP 403 geo-blocked`
+        continue // try next endpoint
+      }
+      if (!res.ok) {
+        throw new Error(`Bybit HTTP ${res.status}: ${text.slice(0, 300)}`)
+      }
+      try { return JSON.parse(text) }
+      catch { throw new Error(`Bybit non-JSON: ${text.slice(0, 300)}`) }
+    } catch (e) {
+      lastError = (e as Error).message
+      if (lastError.includes("geo-blocked")) continue
+      throw e // non-403 errors: don't retry
+    }
   }
-  try {
-    return JSON.parse(text)
-  } catch {
-    throw new Error(`Bybit non-JSON response: ${text.slice(0, 300)}`)
-  }
+  throw new Error(`Bybit all endpoints failed: ${lastError}`)
 }
 
 // ---------------------------------------------------------------------------

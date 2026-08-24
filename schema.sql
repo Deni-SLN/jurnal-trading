@@ -162,3 +162,19 @@ $$ LANGUAGE plpgsql SECURITY DEFINER;
 CREATE OR REPLACE TRIGGER on_auth_user_created
   AFTER INSERT ON auth.users
   FOR EACH ROW EXECUTE FUNCTION public.handle_new_user();
+
+-- 8. ai_settings (per user AI provider configuration)
+CREATE TABLE IF NOT EXISTS ai_settings (
+    user_id         UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    provider        VARCHAR(20)  DEFAULT 'openrouter' NOT NULL, -- 'openrouter' | 'openai'
+    model           VARCHAR(100) DEFAULT 'auto'        NOT NULL,
+    prefer_free     BOOLEAN      DEFAULT true          NOT NULL,
+    openrouter_key  TEXT,
+    openai_key      TEXT,
+    created_at      TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
+    updated_at      TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
+);
+
+ALTER TABLE ai_settings ENABLE ROW LEVEL SECURITY;
+CREATE POLICY "Users can only access own ai settings"
+  ON ai_settings FOR ALL USING (auth.uid() = user_id);
