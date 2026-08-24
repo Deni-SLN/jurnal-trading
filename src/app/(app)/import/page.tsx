@@ -17,6 +17,7 @@ import { formatDistanceToNow } from "date-fns"
 import { id as localeId } from "date-fns/locale"
 import Link from "next/link"
 import { ExchangeAccount } from "@/types/database"
+import { syncBybitClientSide } from "@/lib/bybit-sync"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -356,6 +357,14 @@ export default function ImportPage() {
   const { addToast } = useToast()
   const [accounts, setAccounts] = useState<AccountWithStats[]>([])
   const [loading,  setLoading]  = useState(true)
+  const [userId,   setUserId]   = useState<string | null>(null)
+
+  // Load current user id once
+  useEffect(() => {
+    createClient().auth.getUser().then(({ data }) => {
+      if (data.user) setUserId(data.user.id)
+    })
+  }, [])
 
   const loadAccounts = useCallback(async () => {
     setLoading(true)
@@ -404,46 +413,64 @@ export default function ImportPage() {
       prev.map((a) => a.id === account.id ? { ...a, syncing: true, last_imported: null } : a)
     )
 
-    const endpoint = account.exchange === "okx" ? "/api/sync/okx" : "/api/sync/bybit"
-
     try {
-      const res  = await fetch(endpoint, {
-        method:  "POST",
-        headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ account_id: account.id }),
-      })
-      const data = await res.json()
+      let imported = 0
+      let message  = ""
 
-      if (!res.ok) {
-        const detail = data.detail ? ` — ${data.detail}` : ""
-        addToast({
-          title:       `Sync ${account.account_name} gagal`,
-          description: (data.error || "Terjadi kesalahan.") + detail,
-          variant:     "destructive",
-        })
-        setAccounts((prev) =>
-          prev.map((a) => a.id === account.id ? { ...a, syncing: false } : a)
+      if (account.exchange === "bybit") {
+        // ── Bybit: client-side sync (bypasses Vercel US geo-block) ──
+        if (!userId) throw new Error("User belum terautentikasi.")
+        const result = await syncBybitClientSide(
+          account.id,
+          userId,
+          (progress) => {
+            // Update progress label in syncing badge (optional)
+            console.log("[bybit sync]", progress.stage)
+          }
         )
+        imported = result.imported
+        message  = result.message
+
       } else {
-        addToast({
-          title:       `Sync ${account.account_name} selesai`,
-          description: data.message,
-          variant:     "success",
+        // ── OKX & others: server-side sync ──
+        const res  = await fetch("/api/sync/okx", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ account_id: account.id }),
         })
-        setAccounts((prev) =>
-          prev.map((a) =>
-            a.id === account.id ? { ...a, syncing: false, last_imported: data.imported } : a
-          )
-        )
-        await loadAccounts()
+        const data = await res.json()
+        if (!res.ok) {
+          const detail = data.detail ? ` — ${data.detail}` : ""
+          throw new Error((data.error || "Terjadi kesalahan.") + detail)
+        }
+        imported = data.imported
+        message  = data.message
       }
-    } catch {
-      addToast({ title: "Sync gagal", description: "Tidak dapat menghubungi server.", variant: "destructive" })
+
+      addToast({
+        title:       `Sync ${account.account_name} selesai`,
+        description: message,
+        variant:     "success",
+      })
+      setAccounts((prev) =>
+        prev.map((a) =>
+          a.id === account.id ? { ...a, syncing: false, last_imported: imported } : a
+        )
+      )
+      await loadAccounts()
+
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Terjadi kesalahan."
+      addToast({
+        title:       `Sync ${account.account_name} gagal`,
+        description: msg,
+        variant:     "destructive",
+      })
       setAccounts((prev) =>
         prev.map((a) => a.id === account.id ? { ...a, syncing: false } : a)
       )
     }
-  }, [addToast, loadAccounts])
+  }, [addToast, loadAccounts, userId])
 
   const handleSyncAll = async () => {
     const eligible = accounts.filter((a) => !a.syncing)
