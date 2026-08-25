@@ -67,7 +67,7 @@ async function bybitGet(
       const res = await fetch(t.url, { method: "GET", headers })
       const text = await res.text()
       if (res.status === 403) {
-        errors.push(`${t.label} HTTP 403 geo-blocked`)
+        errors.push(`${t.label} HTTP 403 geo-blocked [${text.slice(0, 150)}]`)
         continue // try next endpoint
       }
       if (!res.ok) {
