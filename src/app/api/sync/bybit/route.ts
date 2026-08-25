@@ -4,9 +4,9 @@ import { hmacSha256Hex } from "@/lib/hmac"
 
 // ---------------------------------------------------------------------------
 // Force this serverless function to run in Singapore (Bybit blocks US IPs)
-// Vercel region codes: sin1=Singapore, hnd1=Tokyo, icn1=Seoul, bom1=Mumbai
+// NOTE: must be a SINGLE region on Vercel Hobby — arrays are ignored there
 // ---------------------------------------------------------------------------
-export const preferredRegion = ["sin1", "hnd1", "icn1", "bom1"]
+export const preferredRegion = "sin1"
 
 // ---------------------------------------------------------------------------
 // Bybit endpoints — full list from official docs
@@ -15,8 +15,7 @@ export const preferredRegion = ["sin1", "hnd1", "icn1", "bom1"]
 // api.bybit.com & api.bytick.com are blocked from US/CN — hence the list
 // ---------------------------------------------------------------------------
 const BYBIT_ENDPOINTS = [
-  "https://api.bytick.com",       // Bybit Singapore mirror
-  "https://api.bybit.com",        // Main (blocked from US/CN)
+  "https://api.bybit.com",        // Main
   "https://api.bybit.nl",         // Netherlands
   "https://api.bybit.eu",         // EEA
 ]
