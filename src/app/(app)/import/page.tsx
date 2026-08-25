@@ -26,6 +26,14 @@ interface AccountWithStats extends ExchangeAccount {
   trade_count:   number
   syncing:       boolean
   last_imported: number | null
+  api_key_encrypted?:    string | null
+  api_secret_encrypted?: string | null
+}
+
+function maskKey(val?: string | null): string {
+  if (!val) return ""
+  if (val.length <= 8) return "••••"
+  return `${val.slice(0, 4)}••••${val.slice(-4)}`
 }
 
 interface EditForm {
@@ -161,7 +169,7 @@ function EditModal({
         <Input
           value={form.api_key}
           onChange={(e) => setForm({ ...form, api_key: e.target.value })}
-          placeholder="Paste API key baru…"
+          placeholder={maskKey(account.api_key_encrypted) || "Paste API key baru…"}
           className="mt-1 h-8 text-sm font-mono"
         />
       </div>
@@ -174,7 +182,7 @@ function EditModal({
             type={showSecret ? "text" : "password"}
             value={form.api_secret}
             onChange={(e) => setForm({ ...form, api_secret: e.target.value })}
-            placeholder="Paste API secret baru…"
+            placeholder={account.api_secret_encrypted ? "•••••••• (terisi — kosongkan jika tidak berubah)" : "Paste API secret baru…"}
             className="h-8 text-sm font-mono pr-8"
           />
           <button

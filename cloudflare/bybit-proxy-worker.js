@@ -25,6 +25,8 @@ export default {
       const val = request.headers.get(name)
       if (val) headers.set(name, val)
     }
+    headers.set("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36")
+    headers.set("Accept", "application/json")
 
     try {
       const res = await fetch(target, { method: "GET", headers })
