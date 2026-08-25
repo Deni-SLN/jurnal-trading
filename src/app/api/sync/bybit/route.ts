@@ -43,22 +43,23 @@ async function bybitGet(
     "X-BAPI-RECV-WINDOW":  recvWindow,
   }
 
-  // Try each endpoint in order, return first success
-  let lastError = ""
+  // Try each target in order, return first success
+  const errors: string[] = []
+  const proxyBase = process.env.BYBIT_PROXY_URL?.trim()
 
-  // Build candidate URLs: proxy first (if configured), then direct endpoints
   const targets: { url: string; label: string }[] = []
-  const proxyBase = process.env.BYBIT_PROXY_URL
   if (proxyBase) {
+    // Proxy configured → use it exclusively (direct calls are IP-blocked anyway)
     for (const base of BYBIT_ENDPOINTS) {
       targets.push({
         url:  `${proxyBase.replace(/\/$/, "")}?url=${encodeURIComponent(`${base}${path}?${qs}`)}`,
         label: `proxy(${base})`,
       })
     }
-  }
-  for (const base of BYBIT_ENDPOINTS) {
-    targets.push({ url: `${base}${path}?${qs}`, label: base })
+  } else {
+    for (const base of BYBIT_ENDPOINTS) {
+      targets.push({ url: `${base}${path}?${qs}`, label: base })
+    }
   }
 
   for (const t of targets) {
@@ -66,25 +67,25 @@ async function bybitGet(
       const res = await fetch(t.url, { method: "GET", headers })
       const text = await res.text()
       if (res.status === 403) {
-        lastError = `${t.label} HTTP 403 geo-blocked`
+        errors.push(`${t.label} HTTP 403 geo-blocked`)
         continue // try next endpoint
       }
       if (!res.ok) {
-        lastError = `${t.label} HTTP ${res.status}: ${text.slice(0, 200)}`
+        errors.push(`${t.label} HTTP ${res.status}: ${text.slice(0, 200)}`)
         continue // try next endpoint on any HTTP error
       }
       try {
         return JSON.parse(text)
       } catch {
-        lastError = `${t.label} non-JSON response`
+        errors.push(`${t.label} non-JSON response`)
         continue
       }
     } catch (e) {
-      lastError = `${t.label} fetch error: ${(e as Error).message}`
+      errors.push(`${t.label} fetch error: ${(e as Error).message}`)
       continue // network error — try next endpoint
     }
   }
-  throw new Error(`Semua endpoint Bybit gagal. ${lastError}`)
+  throw new Error(`Semua endpoint Bybit gagal. ${errors.join(" | ")}`)
 }
 
 // ---------------------------------------------------------------------------
