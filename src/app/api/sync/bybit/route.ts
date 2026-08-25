@@ -45,27 +45,42 @@ async function bybitGet(
 
   // Try each endpoint in order, return first success
   let lastError = ""
+
+  // Build candidate URLs: proxy first (if configured), then direct endpoints
+  const targets: { url: string; label: string }[] = []
+  const proxyBase = process.env.BYBIT_PROXY_URL
+  if (proxyBase) {
+    for (const base of BYBIT_ENDPOINTS) {
+      targets.push({
+        url:  `${proxyBase.replace(/\/$/, "")}?url=${encodeURIComponent(`${base}${path}?${qs}`)}`,
+        label: `proxy(${base})`,
+      })
+    }
+  }
   for (const base of BYBIT_ENDPOINTS) {
+    targets.push({ url: `${base}${path}?${qs}`, label: base })
+  }
+
+  for (const t of targets) {
     try {
-      const url = `${base}${path}?${qs}`
-      const res = await fetch(url, { method: "GET", headers })
+      const res = await fetch(t.url, { method: "GET", headers })
       const text = await res.text()
       if (res.status === 403) {
-        lastError = `${base} HTTP 403 geo-blocked`
+        lastError = `${t.label} HTTP 403 geo-blocked`
         continue // try next endpoint
       }
       if (!res.ok) {
-        lastError = `${base} HTTP ${res.status}: ${text.slice(0, 200)}`
+        lastError = `${t.label} HTTP ${res.status}: ${text.slice(0, 200)}`
         continue // try next endpoint on any HTTP error
       }
       try {
         return JSON.parse(text)
       } catch {
-        lastError = `${base} non-JSON response`
+        lastError = `${t.label} non-JSON response`
         continue
       }
     } catch (e) {
-      lastError = `${base} fetch error: ${(e as Error).message}`
+      lastError = `${t.label} fetch error: ${(e as Error).message}`
       continue // network error — try next endpoint
     }
   }
