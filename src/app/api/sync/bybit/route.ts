@@ -199,9 +199,9 @@ export async function POST(req: NextRequest) {
     const apiKey = (account.api_key_encrypted  as string | null) ?? ""
     const secret = (account.api_secret_encrypted as string | null) ?? ""
 
-    if (!apiKey.trim() || !secret.trim()) {
+    if (!apiKey.trim()) {
       return NextResponse.json(
-        { error: "API key atau secret kosong. Update di Settings." },
+        { error: "API key kosong. Update di Settings." },
         { status: 422 }
       )
     }

@@ -25,7 +25,7 @@ CREATE TABLE IF NOT EXISTS exchange_accounts (
     exchange VARCHAR(20) NOT NULL, -- 'okx', 'bybit'
     account_name VARCHAR(100) NOT NULL,
     api_key_encrypted TEXT NOT NULL,
-    api_secret_encrypted TEXT NOT NULL,
+    api_secret_encrypted TEXT, -- nullable: sub-akun Bybit hanya punya API key
     passphrase_encrypted TEXT, -- OKX only
     is_active BOOLEAN DEFAULT true NOT NULL,
     last_sync_at TIMESTAMP WITH TIME ZONE,
@@ -166,15 +166,24 @@ CREATE OR REPLACE TRIGGER on_auth_user_created
 -- 8. ai_settings (per user AI provider configuration)
 CREATE TABLE IF NOT EXISTS ai_settings (
     user_id         UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    provider        VARCHAR(20)  DEFAULT 'openrouter' NOT NULL, -- 'openrouter' | 'openai'
-    model           VARCHAR(100) DEFAULT 'auto'        NOT NULL,
-    prefer_free     BOOLEAN      DEFAULT true          NOT NULL,
+    provider        VARCHAR(20)  DEFAULT 'gemini'  NOT NULL, -- 'openrouter' | 'openai' | 'gemini'
+    model           VARCHAR(100) DEFAULT 'auto'    NOT NULL,
+    prefer_free     BOOLEAN      DEFAULT true      NOT NULL,
     openrouter_key  TEXT,
     openai_key      TEXT,
+    gemini_key      TEXT,
     created_at      TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL,
     updated_at      TIMESTAMP WITH TIME ZONE DEFAULT timezone('utc'::text, now()) NOT NULL
 );
 
 ALTER TABLE ai_settings ENABLE ROW LEVEL SECURITY;
-CREATE POLICY "Users can only access own ai settings"
-  ON ai_settings FOR ALL USING (auth.uid() = user_id);
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_policies
+    WHERE tablename = 'ai_settings'
+    AND   policyname = 'Users can only access own ai settings'
+  ) THEN
+    CREATE POLICY "Users can only access own ai settings"
+      ON ai_settings FOR ALL USING (auth.uid() = user_id);
+  END IF;
+END $$;

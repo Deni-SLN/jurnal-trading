@@ -17,7 +17,6 @@ import { formatDistanceToNow } from "date-fns"
 import { id as localeId } from "date-fns/locale"
 import Link from "next/link"
 import { ExchangeAccount } from "@/types/database"
-import { syncBybitClientSide } from "@/lib/bybit-sync"
 
 // ---------------------------------------------------------------------------
 // Types
@@ -418,19 +417,19 @@ export default function ImportPage() {
       let message  = ""
 
       if (account.exchange === "bybit") {
-        // ── Bybit: client-side sync (bypasses Vercel US geo-block) ──
-        if (!userId) throw new Error("User belum terautentikasi.")
-        const result = await syncBybitClientSide(
-          account.id,
-          userId,
-          (progress) => {
-            // Update progress label in syncing badge (optional)
-            console.log("[bybit sync]", progress.stage)
-          }
-        )
-        imported = result.imported
-        message  = result.message
-
+        // ── Bybit: server-side sync (browser fetch ke Bybit diblokir CORS) ──
+        const res  = await fetch("/api/sync/bybit", {
+          method:  "POST",
+          headers: { "Content-Type": "application/json" },
+          body:    JSON.stringify({ account_id: account.id }),
+        })
+        const data = await res.json()
+        if (!res.ok) {
+          const detail = data.detail ? ` — ${data.detail}` : ""
+          throw new Error((data.error || "Terjadi kesalahan.") + detail)
+        }
+        imported = data.imported
+        message  = data.message
       } else {
         // ── OKX & others: server-side sync ──
         const res  = await fetch("/api/sync/okx", {

@@ -145,6 +145,9 @@ export async function syncBybitClientSide(
   }
 
   const { api_key, api_secret } = creds
+  if (!api_secret) {
+    console.warn("[bybit-sync] API secret kosong (sub-akun Bybit) — lanjut tanpa secret.")
+  }
   const since    = Date.now() - 90 * 24 * 60 * 60 * 1000
   const cats     = ["linear", "spot", "inverse"]
   const allOrders: ReturnType<typeof mapOrder>[] = []

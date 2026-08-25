@@ -250,7 +250,7 @@ function SettingsInner() {
       exchange:             exchangeForm.exchange,
       account_name:         exchangeForm.account_name,
       api_key_encrypted:    exchangeForm.api_key,
-      api_secret_encrypted: exchangeForm.api_secret,
+      api_secret_encrypted: exchangeForm.api_secret || null,
       passphrase_encrypted: exchangeForm.passphrase || null,
       sync_status:          "disconnected",
     })
@@ -409,8 +409,8 @@ function SettingsInner() {
                     <Input value={exchangeForm.api_key} onChange={(e) => setExchangeForm({ ...exchangeForm, api_key: e.target.value })} className="mt-1 font-mono" required />
                   </div>
                   <div>
-                    <Label>API Secret</Label>
-                    <Input type="password" value={exchangeForm.api_secret} onChange={(e) => setExchangeForm({ ...exchangeForm, api_secret: e.target.value })} className="mt-1" required />
+                    <Label>{exchangeForm.exchange === "bybit" ? "API Secret (opsional untuk sub-akun)" : "API Secret"}</Label>
+                    <Input type="password" value={exchangeForm.api_secret} onChange={(e) => setExchangeForm({ ...exchangeForm, api_secret: e.target.value })} className="mt-1" required={exchangeForm.exchange === "okx"} />
                   </div>
                   {exchangeForm.exchange === "okx" && (
                     <div>
